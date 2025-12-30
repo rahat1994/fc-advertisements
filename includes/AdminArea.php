@@ -246,8 +246,9 @@ class FC_Advertisements_Admin {
                         <select name="fc_ads_position" id="fc_ads_position" required>
                             <option value="">Select Position</option>
                             <option value="content">Content</option>
-                            <option value="sidebar">Sidebar</option>
-                            <option value="space-banner">Space Banner</option>
+                            <option value="sidebar" disabled>Sidebar (Coming Soon!!!)</option>
+                            <option value="space-banner" disabled>Banner (Coming Soon!!!)</option>
+                            <option value="before-create-status-holder">Before status creation field</option>
                         </select>
                     </div>
                     

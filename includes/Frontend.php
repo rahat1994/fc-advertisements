@@ -46,17 +46,25 @@ class FC_Advertisements_Frontend {
         $script_injected = true;
         
         // Fetch ALL enabled ads for content position
-        // JavaScript will handle space-specific filtering since FluentCommunity is a SPA
         $feed_ads = $this->db->get_all(array(
             'status' => 'enabled',
             'position' => 'content'
         ));
+
+        // Fetch ALL enabled ads for before-create-status-holder position
+        $status_ads = $this->db->get_all(array(
+            'status' => 'enabled',
+            'position' => 'before-create-status-holder'
+        ));
         
-        if (empty($feed_ads)) {
+        // Merge results
+        $all_ads = array_merge($feed_ads, $status_ads);
+
+        if (empty($all_ads)) {
             return;
         }
         
-        $ads_data = array_values($feed_ads);
+        $ads_data = array_values($all_ads);
         ?>
         <style>
             .fc-sponsored-post {
@@ -166,30 +174,42 @@ class FC_Advertisements_Frontend {
             }
             
             // Filter ads by current space
-            function getAdsForCurrentSpace() {
+            // Filter ads by position and space
+            function getAdsForPosition(position) {
                 const currentSpace = getCurrentSpaceSlug();
                 const allAds = window.fcAdsData || [];
                 
-                console.log('FC Ads: Current space:', currentSpace || '(none - showing all)');
+                // Initial filter by position
+                const positionAds = allAds.filter(ad => ad.position === position);
                 
-                // If not on a space page (e.g., /portal/), show ads marked for 'all'
+                // If we are not in a specific space, only return global ads
                 if (!currentSpace) {
-                    return allAds.filter(function(ad) {
-                        return ad.space === 'all';
-                    });
+                    return positionAds.filter(ad => ad.space === 'all');
                 }
                 
-                // On a specific space page: show ads for current space OR ads marked for 'all' spaces
-                return allAds.filter(function(ad) {
-                    return ad.space === 'all' || ad.space === currentSpace;
-                });
+                // We are in a specific space
+                // First, check if there are ads specific to this space
+                const specificAds = positionAds.filter(ad => ad.space === currentSpace);
+                
+                if (specificAds.length > 0) {
+                    return specificAds;
+                }
+                
+                // If no specific ads, fall back to global ads
+                return positionAds.filter(ad => ad.space === 'all');
             }
             
             // Create sponsored post HTML
             function createSponsoredPost(ad) {
                 const div = document.createElement('div');
-                div.className = 'fc-sponsored-post feed_list_item';
+                div.className = 'fc-sponsored-post';
+                if (ad.position === 'content') {
+                    div.classList.add('feed_list_item');
+                } else {
+                    div.classList.add('fc-ad-' + ad.position);
+                }
                 div.setAttribute('data-ad-id', ad.id);
+                div.setAttribute('data-ad-position', ad.position);
                 div.setAttribute('data-ad-space', ad.space);
                 div.innerHTML = `
                     <div class="fc-sponsored-label">
@@ -228,37 +248,56 @@ class FC_Advertisements_Frontend {
             
             // Inject ads into feed
             function injectAds() {
+                let anyInjected = false;
+
+                // 1. Inject before-create-status-holder
+                const statusHolder = document.querySelector('.create_status_holder');
+                if (statusHolder) {
+                    // Check if we already have an ad there
+                    const prev = statusHolder.previousElementSibling;
+                    const alreadyHasAd = prev && prev.classList.contains('fc-sponsored-post') && 
+                                       prev.getAttribute('data-ad-position') === 'before-create-status-holder';
+                    
+                    if (!alreadyHasAd) {
+                        const statusAds = getAdsForPosition('before-create-status-holder');
+                        if (statusAds && statusAds.length > 0) {
+                            // Pick a random one or the first one
+                            const ad = statusAds[Math.floor(Math.random() * statusAds.length)];
+                            const adElement = createSponsoredPost(ad);
+                            statusHolder.parentNode.insertBefore(adElement, statusHolder);
+                            anyInjected = true;
+                        }
+                    } else {
+                        anyInjected = true;
+                    }
+                }
+                
+                // 2. Inject feed ads
                 const feedContainer = document.querySelector('.all_feeds_holder');
                 const feedItems = document.querySelectorAll('.feed_list_item:not(.fc-sponsored-post)');
                 
-                if (!feedContainer || feedItems.length === 0) {
-                    return false;
-                }
-                
-                // Remove any existing sponsored posts first
-                document.querySelectorAll('.fc-sponsored-post').forEach(el => el.remove());
-                
-                // Get ads for current space
-                const ads = getAdsForCurrentSpace();
-                
-                console.log('FC Ads: Found', ads.length, 'ads for current space');
-                
-                if (!ads || ads.length === 0) {
-                    return true; // No ads to show, but feed exists
-                }
-                
-                // Insert ads after every 2nd post
-                let adIndex = 0;
-                feedItems.forEach((item, index) => {
-                    if ((index + 1) % 2 === 0 && adIndex < ads.length) {
-                        const adElement = createSponsoredPost(ads[adIndex]);
-                        item.parentNode.insertBefore(adElement, item.nextSibling);
-                        adIndex++;
+                if (feedContainer && feedItems.length > 0) {
+                    // Remove any existing content sponsored posts to re-layout
+                    document.querySelectorAll('.fc-sponsored-post[data-ad-position="content"]').forEach(el => el.remove());
+                    
+                    // Get ads for content
+                    const ads = getAdsForPosition('content');
+                    
+                    if (ads && ads.length > 0) {
+                        // Insert ads after every 2nd post
+                        let adIndex = 0;
+                        feedItems.forEach((item, index) => {
+                            if ((index + 1) % 2 === 0 && adIndex < ads.length) {
+                                const adElement = createSponsoredPost(ads[adIndex]);
+                                item.parentNode.insertBefore(adElement, item.nextSibling);
+                                adIndex++;
+                            }
+                        });
+                        anyInjected = true;
                     }
-                });
+                }
                 
-                console.log('FC Ads: Injected', adIndex, 'ads into feed');
-                return true;
+                return anyInjected;
             }
             
             // Setup MutationObserver for feed changes
@@ -293,7 +332,8 @@ class FC_Advertisements_Frontend {
                                     // Trigger on feed items or feed container
                                     if (node.classList && (
                                         node.classList.contains('feed_list_item') ||
-                                        node.classList.contains('all_feeds_holder')
+                                        node.classList.contains('all_feeds_holder') ||
+                                        node.classList.contains('create_status_holder')
                                     )) {
                                         shouldReinject = true;
                                         break;
