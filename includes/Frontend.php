@@ -15,14 +15,41 @@ class FC_Advertisements_Frontend {
     }
 
     /**
+     * Get current space slug from URL
+     * Example URL: http://testing_ground.test/portal/space/start-here/home
+     * Returns: 'start-here'
+     * 
+     * NOTE: This is kept for potential future use, but since FluentCommunity is a SPA,
+     * space detection should happen in JavaScript for proper navigation handling.
+     */
+    private function get_current_space_slug() {
+        $current_url = $_SERVER['REQUEST_URI'];
+        
+        // Match pattern: /portal/space/{slug}/
+        if (preg_match('#/portal/space/([^/]+)/#', $current_url, $matches)) {
+            return $matches[1];
+        }
+        
+        // If not on a space page, return empty string
+        return '';
+    }
+
+    /**
      * Inject JavaScript to display ads in the feed
      */
     public function inject_feed_ads_script() {
-        // Only run on pages that might have FluentCommunity
-        // Fetch only enabled ads for content space directly from database
+        // Prevent multiple injections
+        static $script_injected = false;
+        if ($script_injected) {
+            return;
+        }
+        $script_injected = true;
+        
+        // Fetch ALL enabled ads for content position
+        // JavaScript will handle space-specific filtering since FluentCommunity is a SPA
         $feed_ads = $this->db->get_all(array(
             'status' => 'enabled',
-            'space' => 'content'
+            'position' => 'content'
         ));
         
         if (empty($feed_ads)) {
@@ -125,14 +152,45 @@ class FC_Advertisements_Frontend {
         (function() {
             // Store ads data
             window.fcAdsData = <?php echo json_encode($ads_data); ?>;
-            window.fcAdsInjected = false;
-            window.fcAdsInterval = null;
+            window.fcAdsObserver = null;
+            window.fcAdsLastPath = null;
+            
+            // Get current space slug from URL
+            function getCurrentSpaceSlug() {
+                // Always use current window location for accurate space detection
+                const url = window.location.pathname;
+                
+                // Regex handles both /portal/space/{slug}/ and /portal/space/{slug} (no trailing slash)
+                const match = url.match(/\/portal\/space\/([^\/]+)(?:\/|$)/);
+                return match ? match[1] : '';
+            }
+            
+            // Filter ads by current space
+            function getAdsForCurrentSpace() {
+                const currentSpace = getCurrentSpaceSlug();
+                const allAds = window.fcAdsData || [];
+                
+                console.log('FC Ads: Current space:', currentSpace || '(none - showing all)');
+                
+                // If not on a space page (e.g., /portal/), show ads marked for 'all'
+                if (!currentSpace) {
+                    return allAds.filter(function(ad) {
+                        return ad.space === 'all';
+                    });
+                }
+                
+                // On a specific space page: show ads for current space OR ads marked for 'all' spaces
+                return allAds.filter(function(ad) {
+                    return ad.space === 'all' || ad.space === currentSpace;
+                });
+            }
             
             // Create sponsored post HTML
             function createSponsoredPost(ad) {
                 const div = document.createElement('div');
                 div.className = 'fc-sponsored-post feed_list_item';
                 div.setAttribute('data-ad-id', ad.id);
+                div.setAttribute('data-ad-space', ad.space);
                 div.innerHTML = `
                     <div class="fc-sponsored-label">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -180,9 +238,13 @@ class FC_Advertisements_Frontend {
                 // Remove any existing sponsored posts first
                 document.querySelectorAll('.fc-sponsored-post').forEach(el => el.remove());
                 
-                const ads = window.fcAdsData;
+                // Get ads for current space
+                const ads = getAdsForCurrentSpace();
+                
+                console.log('FC Ads: Found', ads.length, 'ads for current space');
+                
                 if (!ads || ads.length === 0) {
-                    return true;
+                    return true; // No ads to show, but feed exists
                 }
                 
                 // Insert ads after every 2nd post
@@ -195,88 +257,188 @@ class FC_Advertisements_Frontend {
                     }
                 });
                 
+                console.log('FC Ads: Injected', adIndex, 'ads into feed');
                 return true;
             }
             
-            // Watch for feed changes using MutationObserver
-            function watchFeed() {
-                // Initial injection attempt
-                if (injectAds()) {
-                    console.log('FC Ads: Injected ads into feed');
+            // Setup MutationObserver for feed changes
+            function setupObserver() {
+                // Disconnect existing observer if any
+                if (window.fcAdsObserver) {
+                    window.fcAdsObserver.disconnect();
+                    window.fcAdsObserver = null;
                 }
                 
+                let debounceTimer = null;
+                let isInjecting = false;
+                
                 // Watch for dynamic content changes
-                const observer = new MutationObserver((mutations) => {
+                window.fcAdsObserver = new MutationObserver((mutations) => {
+                    // Ignore mutations while we're injecting ads
+                    if (isInjecting) {
+                        return;
+                    }
+                    
                     let shouldReinject = false;
                     
-                    mutations.forEach((mutation) => {
+                    for (const mutation of mutations) {
                         if (mutation.addedNodes.length > 0) {
-                            mutation.addedNodes.forEach((node) => {
+                            for (const node of mutation.addedNodes) {
                                 if (node.nodeType === 1) {
+                                    // Ignore our own sponsored posts
+                                    if (node.classList && node.classList.contains('fc-sponsored-post')) {
+                                        continue;
+                                    }
+                                    
+                                    // Trigger on feed items or feed container
                                     if (node.classList && (
                                         node.classList.contains('feed_list_item') ||
-                                        node.classList.contains('all_feeds_holder') ||
-                                        node.querySelector && node.querySelector('.feed_list_item')
+                                        node.classList.contains('all_feeds_holder')
                                     )) {
                                         shouldReinject = true;
+                                        break;
+                                    }
+                                    
+                                    // Check if node contains feed items
+                                    if (node.querySelector && node.querySelector('.feed_list_item:not(.fc-sponsored-post)')) {
+                                        shouldReinject = true;
+                                        break;
                                     }
                                 }
-                            });
+                            }
                         }
-                    });
+                        if (shouldReinject) break;
+                    }
                     
                     if (shouldReinject) {
-                        setTimeout(injectAds, 100);
+                        clearTimeout(debounceTimer);
+                        debounceTimer = setTimeout(() => {
+                            isInjecting = true;
+                            injectAds();
+                            setTimeout(() => {
+                                isInjecting = false;
+                            }, 500);
+                        }, 200);
                     }
                 });
                 
-                // Observe the main content area
-                const mainContent = document.querySelector('.el-main.fcom_main') || document.body;
-                observer.observe(mainContent, {
-                    childList: true,
-                    subtree: true
-                });
-            }
-            
-            // Initialize when DOM is ready
-            function init() {
-                // Try to inject immediately
-                if (document.querySelector('.all_feeds_holder')) {
-                    watchFeed();
-                } else {
-                    // Wait for feed to load (SPA navigation)
-                    window.fcAdsInterval = setInterval(() => {
-                        if (document.querySelector('.all_feeds_holder')) {
-                            clearInterval(window.fcAdsInterval);
-                            watchFeed();
-                        }
-                    }, 500);
-                    
-                    // Clear interval after 30 seconds to prevent infinite loop
-                    setTimeout(() => {
-                        if (window.fcAdsInterval) {
-                            clearInterval(window.fcAdsInterval);
-                        }
-                    }, 30000);
+                // Observe the main content area to catch feed container creation
+                const mainContent = document.querySelector('.fcom_portal_layout') || 
+                                   document.querySelector('.el-main.fcom_main') ||
+                                   document.querySelector('#fcom_app') ||
+                                   document.body;
+                
+                if (mainContent) {
+                    window.fcAdsObserver.observe(mainContent, {
+                        childList: true,
+                        subtree: true
+                    });
+                    console.log('FC Ads: Observer attached to', mainContent.className || 'body');
                 }
             }
             
-            // Handle SPA navigation
-            if (window.fluentFrameworkAppRouter) {
-                window.fluentFrameworkAppRouter.afterEach(() => {
-                    setTimeout(init, 300);
+            // Handle navigation (called on route change)
+            function handleNavigation() {
+                const currentPath = window.location.pathname;
+                
+                // Check if we actually navigated to a different path
+                if (window.fcAdsLastPath === currentPath) {
+                    return;
+                }
+                
+                console.log('FC Ads: Navigation detected from', window.fcAdsLastPath, 'to', currentPath);
+                window.fcAdsLastPath = currentPath;
+                
+                // Remove existing ads immediately on navigation
+                document.querySelectorAll('.fc-sponsored-post').forEach(el => el.remove());
+                
+                // Wait for new feed content to load, then inject
+                let retryCount = 0;
+                const maxRetries = 30; // 6 seconds max
+                
+                const tryInject = () => {
+                    const feedContainer = document.querySelector('.all_feeds_holder');
+                    const feedItems = document.querySelectorAll('.feed_list_item:not(.fc-sponsored-post)');
+                    
+                    if (feedContainer && feedItems.length > 0) {
+                        // Feed is ready, inject ads
+                        injectAds();
+                        // Re-setup observer for the new feed
+                        setupObserver();
+                    } else if (retryCount < maxRetries) {
+                        retryCount++;
+                        setTimeout(tryInject, 200);
+                    } else {
+                        console.log('FC Ads: Feed not found after navigation, giving up');
+                    }
+                };
+                
+                // Start trying after a short delay to let Vue update the DOM
+                setTimeout(tryInject, 100);
+            }
+            
+            // Initialize the ad system
+            function init() {
+                console.log('FC Ads: Initializing...');
+                
+                window.fcAdsLastPath = window.location.pathname;
+                
+                // Initial injection
+                if (injectAds()) {
+                    console.log('FC Ads: Initial injection successful');
+                }
+                
+                // Setup observer
+                setupObserver();
+                
+                // Hook into Vue Router if available
+                if (window.fluentFrameworkAppRouter) {
+                    console.log('FC Ads: Hooking into FluentFramework router');
+                    window.fluentFrameworkAppRouter.afterEach((to, from) => {
+                        // Use nextTick-like delay to ensure Vue has updated
+                        setTimeout(handleNavigation, 50);
+                    });
+                }
+                
+                // Also watch for URL changes via popstate (back/forward buttons)
+                window.addEventListener('popstate', () => {
+                    setTimeout(handleNavigation, 50);
                 });
             }
             
-            // Start initialization
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', init);
-            } else {
-                init();
+            // Wait for router to be available, then initialize
+            function waitForRouter() {
+                let attempts = 0;
+                const maxAttempts = 50; // 5 seconds max
+                
+                const checkRouter = () => {
+                    if (window.fluentFrameworkAppRouter) {
+                        init();
+                    } else if (attempts < maxAttempts) {
+                        attempts++;
+                        setTimeout(checkRouter, 100);
+                    } else {
+                        // Router not found, initialize anyway
+                        console.log('FC Ads: Router not found, initializing without router hooks');
+                        init();
+                    }
+                };
+                
+                checkRouter();
             }
             
-            // Also listen for the FluentCommunity ready event
-            document.addEventListener('fluentCommunityUtilReady', init);
+            // Start when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', waitForRouter);
+            } else {
+                waitForRouter();
+            }
+            
+            // Also listen for FluentCommunity ready event
+            document.addEventListener('fluentCommunityUtilReady', () => {
+                console.log('FC Ads: FluentCommunity ready event received');
+                setTimeout(handleNavigation, 100);
+            });
         })();
         </script>
         <?php

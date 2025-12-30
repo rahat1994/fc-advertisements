@@ -69,7 +69,8 @@ class FC_Advertisements_Database {
      * 
      * @param array $args Optional. Array of arguments to filter results.
      *                    - 'status' (string) Filter by status (e.g., 'enabled', 'disabled')
-     *                    - 'space' (string) Filter by space (e.g., 'content', 'sidebar')
+     *                    - 'space' (string) Filter by space slug (e.g., 'start-here', 'all')
+     *                    - 'position' (string) Filter by position (e.g., 'content', 'sidebar', 'space-banner')
      * @return array Array of advertisement objects
      */
     public function get_all($args = array()) {
@@ -86,6 +87,11 @@ class FC_Advertisements_Database {
         // Filter by space if provided
         if (!empty($args['space'])) {
             $where_clauses[] = $wpdb->prepare("a.space = %s", $args['space']);
+        }
+        
+        // Filter by position if provided
+        if (!empty($args['position'])) {
+            $where_clauses[] = $wpdb->prepare("a.position = %s", $args['position']);
         }
         
         $where_sql = '';
