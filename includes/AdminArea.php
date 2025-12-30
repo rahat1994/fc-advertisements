@@ -25,7 +25,7 @@ class FC_Advertisements_Admin {
         add_menu_page(
             'FC Advertisements',
             'Advertisements',
-            'manage_options',
+            'edit_others_posts',
             'fc-advertisements',
             array($this, 'render_page'),
             'dashicons-megaphone',
@@ -134,7 +134,7 @@ class FC_Advertisements_Admin {
             return;
         }
         
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('edit_others_posts')) {
             return;
         }
         
@@ -179,7 +179,7 @@ class FC_Advertisements_Admin {
         }
         
         // Check permissions
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('edit_others_posts')) {
             wp_send_json_error(array('message' => 'Insufficient permissions'));
             return;
         }
