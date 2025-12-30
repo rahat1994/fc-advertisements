@@ -32,7 +32,7 @@ class FC_Advertisements_Database {
             position varchar(100) NOT NULL,
             url varchar(500) NOT NULL,
             user_id bigint(20) NOT NULL,
-            status varchar(20) DEFAULT 'enabled',
+            status varchar(20) DEFAULT 'disabled',
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             KEY user_id (user_id),
@@ -59,7 +59,7 @@ class FC_Advertisements_Database {
         // Check if status column exists
         $status_exists = $wpdb->get_results("SHOW COLUMNS FROM {$this->table_name} LIKE 'status'");
         if (empty($status_exists)) {
-            $wpdb->query("ALTER TABLE {$this->table_name} ADD COLUMN status varchar(20) DEFAULT 'enabled' AFTER user_id");
+            $wpdb->query("ALTER TABLE {$this->table_name} ADD COLUMN status varchar(20) DEFAULT 'disabled' AFTER user_id");
             $wpdb->query("ALTER TABLE {$this->table_name} ADD INDEX status (status)");
         }
     }
