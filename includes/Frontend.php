@@ -19,10 +19,11 @@ class FC_Advertisements_Frontend {
      */
     public function inject_feed_ads_script() {
         // Only run on pages that might have FluentCommunity
-        $ads = $this->db->get_all();
-        $feed_ads = array_filter($ads, function($ad) {
-            return $ad->space === 'content';
-        });
+        // Fetch only enabled ads for content space directly from database
+        $feed_ads = $this->db->get_all(array(
+            'status' => 'enabled',
+            'space' => 'content'
+        ));
         
         if (empty($feed_ads)) {
             return;

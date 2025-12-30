@@ -48,5 +48,6 @@ class FC_Advertisements {
         }
         
         $this->db->create_table();
+        $this->db->update_table_schema(); // Update existing tables with new columns
     }
 }

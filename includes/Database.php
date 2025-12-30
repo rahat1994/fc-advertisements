@@ -31,8 +31,12 @@ class FC_Advertisements_Database {
             space varchar(100) NOT NULL,
             position varchar(100) NOT NULL,
             url varchar(500) NOT NULL,
+            user_id bigint(20) NOT NULL,
+            status varchar(20) DEFAULT 'enabled',
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id)
+            PRIMARY KEY (id),
+            KEY user_id (user_id),
+            KEY status (status)
         ) $charset_collate;";
         
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -40,11 +44,62 @@ class FC_Advertisements_Database {
     }
 
     /**
-     * Get all advertisements
+     * Update table schema for existing installations
      */
-    public function get_all() {
+    public function update_table_schema() {
         global $wpdb;
-        return $wpdb->get_results("SELECT * FROM {$this->table_name} ORDER BY created_at DESC");
+        
+        // Check if user_id column exists
+        $user_id_exists = $wpdb->get_results("SHOW COLUMNS FROM {$this->table_name} LIKE 'user_id'");
+        if (empty($user_id_exists)) {
+            $wpdb->query("ALTER TABLE {$this->table_name} ADD COLUMN user_id bigint(20) NOT NULL DEFAULT 0 AFTER url");
+            $wpdb->query("ALTER TABLE {$this->table_name} ADD INDEX user_id (user_id)");
+        }
+        
+        // Check if status column exists
+        $status_exists = $wpdb->get_results("SHOW COLUMNS FROM {$this->table_name} LIKE 'status'");
+        if (empty($status_exists)) {
+            $wpdb->query("ALTER TABLE {$this->table_name} ADD COLUMN status varchar(20) DEFAULT 'enabled' AFTER user_id");
+            $wpdb->query("ALTER TABLE {$this->table_name} ADD INDEX status (status)");
+        }
+    }
+
+    /**
+     * Get all advertisements with user information
+     * 
+     * @param array $args Optional. Array of arguments to filter results.
+     *                    - 'status' (string) Filter by status (e.g., 'enabled', 'disabled')
+     *                    - 'space' (string) Filter by space (e.g., 'content', 'sidebar')
+     * @return array Array of advertisement objects
+     */
+    public function get_all($args = array()) {
+        global $wpdb;
+        $users_table = $wpdb->prefix . 'users';
+        
+        $where_clauses = array();
+        
+        // Filter by status if provided
+        if (!empty($args['status'])) {
+            $where_clauses[] = $wpdb->prepare("a.status = %s", $args['status']);
+        }
+        
+        // Filter by space if provided
+        if (!empty($args['space'])) {
+            $where_clauses[] = $wpdb->prepare("a.space = %s", $args['space']);
+        }
+        
+        $where_sql = '';
+        if (!empty($where_clauses)) {
+            $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
+        }
+        
+        $sql = "SELECT a.*, u.display_name as user_name 
+                FROM {$this->table_name} a 
+                LEFT JOIN {$users_table} u ON a.user_id = u.ID 
+                {$where_sql}
+                ORDER BY a.created_at DESC";
+        
+        return $wpdb->get_results($sql);
     }
 
     /**
@@ -52,10 +107,19 @@ class FC_Advertisements_Database {
      */
     public function create($data) {
         global $wpdb;
+        
+        // Set defaults
+        if (!isset($data['status'])) {
+            $data['status'] = 'enabled';
+        }
+        if (!isset($data['user_id'])) {
+            $data['user_id'] = get_current_user_id();
+        }
+        
         return $wpdb->insert(
             $this->table_name,
             $data,
-            array('%s', '%s', '%s', '%s')
+            array('%s', '%s', '%s', '%s', '%d', '%s')
         );
     }
 
@@ -68,11 +132,33 @@ class FC_Advertisements_Database {
     }
 
     /**
-     * Get ads specifically for the feed (content space, random order)
+     * Get ads specifically for the feed (content space, enabled only, random order)
      */
     public function get_for_feed() {
         global $wpdb;
-        return $wpdb->get_results("SELECT * FROM {$this->table_name} WHERE space = 'content' ORDER BY RAND()");
+        return $wpdb->get_results("SELECT * FROM {$this->table_name} WHERE space = 'content' AND status = 'enabled' ORDER BY RAND()");
+    }
+
+    /**
+     * Get single advertisement by ID
+     */
+    public function get_by_id($id) {
+        global $wpdb;
+        return $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->table_name} WHERE id = %d", intval($id)));
+    }
+
+    /**
+     * Update advertisement status
+     */
+    public function update_status($id, $status) {
+        global $wpdb;
+        return $wpdb->update(
+            $this->table_name,
+            array('status' => $status),
+            array('id' => intval($id)),
+            array('%s'),
+            array('%d')
+        );
     }
 
     /**
