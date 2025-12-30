@@ -179,7 +179,7 @@ class FC_Advertisements_Admin {
         }
         
         // Check permissions
-        if (!current_user_can('edit_others_posts')) {
+        if (!current_user_can('manage_options')) {
             wp_send_json_error(array('message' => 'Insufficient permissions'));
             return;
         }
@@ -303,12 +303,14 @@ class FC_Advertisements_Admin {
                                            onclick="return confirm('Are you sure you want to delete this advertisement?');">
                                             Delete
                                         </a>
+                                        <?php if (current_user_can('manage_options')) : ?>
                                         <button type="button" 
                                                 class="button button-small fc-ads-toggle-btn" 
                                                 data-ad-id="<?php echo esc_attr($ad->id); ?>"
                                                 data-status="<?php echo esc_attr($ad->status); ?>">
                                             <?php echo $ad->status === 'enabled' ? 'Disable' : 'Enable'; ?>
                                         </button>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
