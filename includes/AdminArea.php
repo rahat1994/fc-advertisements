@@ -154,7 +154,8 @@ class FC_Advertisements_Admin {
             'title' => $title,
             'space' => $space,
             'position' => $position,
-            'url' => $url
+            'url' => $url,
+            'status' => 'disabled',
         ));
         
         if ($result) {
@@ -193,6 +194,15 @@ class FC_Advertisements_Admin {
             return;
         }
         
+        // Check ownership if not admin
+        if (!current_user_can('manage_options')) {
+            $ad = $this->db->get_by_id($ad_id);
+            if (!$ad || $ad->user_id != get_current_user_id()) {
+                wp_send_json_error(array('message' => 'You do not have permission to modify this advertisement'));
+                return;
+            }
+        }
+        
         $result = $this->db->update_status($ad_id, $status);
         
         if ($result !== false) {
@@ -209,13 +219,33 @@ class FC_Advertisements_Admin {
         // Handle delete action
         if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
             if (wp_verify_nonce($_GET['_wpnonce'], 'fc_ads_delete_' . $_GET['id'])) {
-                $this->db->delete($_GET['id']);
-                echo '<div class="notice notice-success"><p>Advertisement deleted successfully!</p></div>';
+                $id = intval($_GET['id']);
+                $can_delete = true;
+                
+                // Check ownership if not admin
+                if (!current_user_can('manage_options')) {
+                    $ad = $this->db->get_by_id($id);
+                    if (!$ad || $ad->user_id != get_current_user_id()) {
+                        $can_delete = false;
+                        echo '<div class="notice notice-error"><p>You do not have permission to delete this advertisement.</p></div>';
+                    }
+                }
+                
+                if ($can_delete) {
+                    $this->db->delete($id);
+                    echo '<div class="notice notice-success"><p>Advertisement deleted successfully!</p></div>';
+                }
             }
         }
 
         $fcom_spaces = $this->db->get_fcom_spaces();
-        $advertisements = $this->db->get_all();
+        
+        // Filter ads for non-admins
+        $args = array();
+        if (!current_user_can('manage_options')) {
+            $args['user_id'] = get_current_user_id();
+        }
+        $advertisements = $this->db->get_all($args);
         ?>
         <div class="wrap fc-ads-wrap">
             <h1>FC Advertisements</h1>

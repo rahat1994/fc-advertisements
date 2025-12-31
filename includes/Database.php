@@ -93,6 +93,11 @@ class FC_Advertisements_Database {
         if (!empty($args['position'])) {
             $where_clauses[] = $wpdb->prepare("a.position = %s", $args['position']);
         }
+
+        // Filter by user_id if provided
+        if (!empty($args['user_id'])) {
+            $where_clauses[] = $wpdb->prepare("a.user_id = %d", $args['user_id']);
+        }
         
         $where_sql = '';
         if (!empty($where_clauses)) {
@@ -114,10 +119,6 @@ class FC_Advertisements_Database {
     public function create($data) {
         global $wpdb;
         
-        // Set defaults
-        if (!isset($data['status'])) {
-            $data['status'] = 'enabled';
-        }
         if (!isset($data['user_id'])) {
             $data['user_id'] = get_current_user_id();
         }
