@@ -25,8 +25,8 @@ class FC_Advertisements_Frontend {
     private function get_current_space_slug() {
         $current_url = $_SERVER['REQUEST_URI'];
         
-        // Match pattern: /portal/space/{slug}/
-        if (preg_match('#/portal/space/([^/]+)/#', $current_url, $matches)) {
+        // Match pattern: .../space/{slug}/
+        if (preg_match('#/space/([^/]+)/#', $current_url, $matches)) {
             return $matches[1];
         }
         
@@ -168,8 +168,8 @@ class FC_Advertisements_Frontend {
                 // Always use current window location for accurate space detection
                 const url = window.location.pathname;
                 
-                // Regex handles both /portal/space/{slug}/ and /portal/space/{slug} (no trailing slash)
-                const match = url.match(/\/portal\/space\/([^\/]+)(?:\/|$)/);
+                // Regex handles .../space/{slug}/ and .../space/{slug} (no trailing slash)
+                const match = url.match(/\/space\/([^\/]+)(?:\/|$)/);
                 return match ? match[1] : '';
             }
             
